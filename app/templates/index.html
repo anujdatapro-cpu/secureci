@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Student Store - SecureCI Demo</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>🛒 Student Store</h1>
+
+        <p class="subtitle">
+            Demo Web Application Protected by SecureCI
+        </p>
+
+        <div class="menu">
+
+            <a href="/login">
+                🔐 Login
+            </a>
+
+            <a href="/dashboard">
+                📊 Dashboard
+            </a>
+
+        </div>
+
+        <div class="info">
+
+            <h2>About This Application</h2>
+
+            <p>
+                This is a demonstration web application
+                used for testing the SecureCI DevSecOps pipeline.
+            </p>
+
+            <p>
+                SecureCI will automatically check this application
+                for security problems.
+            </p>
+
+        </div>
+
+    </div>
+
+</body>
+
+</html>
