@@ -5,51 +5,118 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Student Store - SecureCI Demo</title>
+    <title>SecureCI Dashboard</title>
 
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
 
-    <div class="container">
+    <header>
+        <h1>SECURECI</h1>
+        <p>Automated DevSecOps Security Pipeline</p>
+    </header>
 
-        <h1>🛒 Student Store</h1>
 
-        <p class="subtitle">
-            Demo Web Application Protected by SecureCI
-        </p>
+    <main>
 
-        <div class="menu">
+        <section class="overview">
 
-            <a href="/login">
-                🔐 Login
-            </a>
+            <h2>Security Scan Results</h2>
 
-            <a href="/dashboard">
-                📊 Dashboard
-            </a>
+            <div class="cards">
 
-        </div>
+                <div class="card">
+                    <h3>SAST</h3>
+                    <p>Semgrep</p>
+                    <span class="pass">{{ status.sast }}</span>
+                </div>
 
-        <div class="info">
 
-            <h2>About This Application</h2>
+                <div class="card">
+                    <h3>Secret Scan</h3>
+                    <p>Gitleaks</p>
+                    <span class="fail">{{ status.secret_scan }}</span>
+                </div>
+
+
+                <div class="card">
+                    <h3>Dependency Scan</h3>
+                    <p>pip-audit</p>
+                    <span class="pass">{{ status.dependency_scan }}</span>
+                </div>
+
+
+                <div class="card">
+                    <h3>DAST</h3>
+                    <p>OWASP ZAP</p>
+                    <span class="pass">{{ status.dast }}</span>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <section class="gate">
+
+            <h2>Security Gate</h2>
+
+            <div class="gate-status">
+                🚨 {{ status.security_gate }}
+            </div>
 
             <p>
-                This is a demonstration web application
-                used for testing the SecureCI DevSecOps pipeline.
+                Deployment is blocked because a critical security
+                issue was detected.
             </p>
 
-            <p>
-                SecureCI will automatically check this application
-                for security problems.
-            </p>
+        </section>
 
-        </div>
 
-    </div>
+        <section class="pipeline">
+
+            <h2>SecureCI Pipeline</h2>
+
+            <div class="flow">
+
+                <div>💻<br>Code</div>
+
+                <span>→</span>
+
+                <div>🔍<br>Scan</div>
+
+                <span>→</span>
+
+                <div>🚦<br>Security Gate</div>
+
+                <span>→</span>
+
+                <div>🚀<br>Deploy</div>
+
+            </div>
+
+        </section>
+
+
+        <section class="application">
+
+            <h2>Demo Application</h2>
+
+            <p>Student Store is being protected by SecureCI.</p>
+
+            <a href="/login">Open Login</a>
+
+            <a href="/dashboard">Open Dashboard</a>
+
+        </section>
+
+    </main>
+
+
+    <footer>
+        <p>SecureCI • DevSecOps Security Automation</p>
+    </footer>
 
 </body>
 

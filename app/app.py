@@ -1,14 +1,25 @@
 from flask import Flask, render_template
+import os
+import json
 
 app = Flask(__name__)
-
-# Demo secret for SecureCI testing
-DEMO_AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+
+    security_status = {
+        "sast": "PASS",
+        "secret_scan": "FAIL",
+        "dependency_scan": "PASS",
+        "dast": "PASS",
+        "security_gate": "BLOCKED"
+    }
+
+    return render_template(
+        "index.html",
+        status=security_status
+    )
 
 
 @app.route("/login")
@@ -19,8 +30,10 @@ def login():
     <form>
         <input type="text" placeholder="Username">
         <br><br>
+
         <input type="password" placeholder="Password">
         <br><br>
+
         <button type="submit">Login</button>
     </form>
     """
