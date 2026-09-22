@@ -3,7 +3,7 @@ from flask import Flask, render_template
 app = Flask(__name__)
 
 # Demo secret for SecureCI testing
-DEMO_API_KEY = "SECURECI_TEST_SECRET_12345"
+DEMO_AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 
 @app.route("/")
