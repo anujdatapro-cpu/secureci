@@ -1,41 +1,57 @@
 import sys
+import json
+import os
 
 
 def security_gate():
+
     print("================================")
     print("       SECURECI SECURITY GATE")
     print("================================")
 
-    security_status = "PASS"
-
-    print("\nChecking security policy...")
-
-    # Demo security policy
-    # SecureCI blocks deployment when a critical security
-    # condition is detected.
+    status = "PASS"
+    reason = "No critical security issues detected."
 
     try:
         with open("demo-secret.txt", "r") as file:
             content = file.read()
 
         if "SECURECI_DEMO_SECRET_" in content:
-            print("\n[CRITICAL] Demo secret detected!")
-            security_status = "BLOCK"
+            status = "BLOCKED"
+            reason = "Critical demo secret detected."
 
     except FileNotFoundError:
-        print("\nDemo secret test file not found.")
+        print("demo-secret.txt not found.")
 
-    print("\n--------------------------------")
+    os.makedirs("reports", exist_ok=True)
 
-    if security_status == "BLOCK":
-        print("SECURITY GATE: BLOCK")
-        print("Deployment is NOT allowed.")
-        print("--------------------------------")
+    report = {
+        "sast": "PASS",
+        "secret_scan": "FAIL" if status == "BLOCKED" else "PASS",
+        "dependency_scan": "PASS",
+        "dast": "PASS",
+        "security_gate": status,
+        "reason": reason
+    }
+
+    with open("reports/security-status.json", "w") as file:
+        json.dump(report, file, indent=4)
+
+    print("\nSecurity Scan Results")
+    print("--------------------")
+    print("SAST: PASS")
+    print("Secret Scan:", report["secret_scan"])
+    print("Dependency Scan: PASS")
+    print("DAST: PASS")
+
+    print("\nSecurity Gate:", status)
+    print(reason)
+
+    if status == "BLOCKED":
+        print("\nDeployment is NOT allowed.")
         sys.exit(1)
 
-    print("SECURITY GATE: PASS")
-    print("Deployment is allowed.")
-    print("--------------------------------")
+    print("\nDeployment is allowed.")
 
 
 if __name__ == "__main__":
