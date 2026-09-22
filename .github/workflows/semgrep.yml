@@ -1,0 +1,27 @@
+name: SecureCI Semgrep SAST
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+
+      - name: Run Semgrep
+        run: semgrep scan --config auto
