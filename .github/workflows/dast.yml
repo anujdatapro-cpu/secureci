@@ -1,0 +1,60 @@
+name: SecureCI DAST Scan
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  dast:
+    name: OWASP ZAP DAST Scan
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Application Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start SecureCI Demo Application
+        run: |
+          nohup python -m flask --app app/app.py run \
+            --host 0.0.0.0 \
+            --port 5000 > flask.log 2>&1 &
+
+      - name: Wait for Application
+        run: |
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:5000 > /dev/null; then
+              echo "Application is running"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Application failed to start"
+          cat flask.log
+          exit 1
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: ghcr.io/zaproxy/zaproxy:stable
+          target: "http://127.0.0.1:5000"
+          allow_issue_writing: false
+          fail_action: false
