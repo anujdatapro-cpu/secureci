@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>SecureCI Security Dashboard</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+
+<body>
+
+
+<header class="header">
+
+    <h1>SECURECI</h1>
+
+    <p>
+        Automated DevSecOps Security Dashboard
+    </p>
+
+</header>
+
+
+<main class="container">
+
+
+    <!-- PROJECT -->
+
+    <section class="project-card">
+
+        <div>
+
+            <span class="label">
+                PROJECT
+            </span>
+
+            <h2>
+                {{ report.project }}
+            </h2>
+
+        </div>
+
+
+        <div>
+
+            <span class="label">
+                REPOSITORY
+            </span>
+
+            <p class="repository">
+                {{ report.repository }}
+            </p>
+
+        </div>
+
+
+        <div>
+
+            <span class="label">
+                LAST SCAN
+            </span>
+
+            <p class="scan-status">
+                {{ report.scan_time }}
+            </p>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- SCAN AGAIN -->
+
+    <section class="rescan-top">
+
+        <div>
+
+            <h2>
+                Security Scan
+            </h2>
+
+            <p>
+                Run SecureCI again after fixing
+                the reported vulnerabilities.
+            </p>
+
+        </div>
+
+
+        <form
+            action="/rescan"
+            method="POST"
+        >
+
+            <button
+                type="submit"
+                class="rescan-button"
+                onclick="this.innerText='Scanning...'; this.disabled=true;"
+            >
+
+                🔄 Scan Again
+
+            </button>
+
+        </form>
+
+    </section>
+
+
+
+    <!-- SUMMARY -->
+
+    <h2 class="section-title">
+        Security Summary
+    </h2>
+
+
+    <section class="summary-grid">
+
+
+        <div class="summary-card">
+
+            <span>
+                TOTAL
+            </span>
+
+            <strong>
+                {{ report.total_vulnerabilities }}
+            </strong>
+
+            <p>
+                Vulnerabilities
+            </p>
+
+        </div>
+
+
+        <div class="summary-card critical">
+
+            <span>
+                CRITICAL
+            </span>
+
+            <strong>
+                {{ report.severity_summary["CRITICAL"] }}
+            </strong>
+
+            <p>
+                Critical issues
+            </p>
+
+        </div>
+
+
+        <div class="summary-card high">
+
+            <span>
+                HIGH
+            </span>
+
+            <strong>
+                {{ report.severity_summary["HIGH"] }}
+            </strong>
+
+            <p>
+                High severity
+            </p>
+
+        </div>
+
+
+        <div class="summary-card medium">
+
+            <span>
+                MEDIUM
+            </span>
+
+            <strong>
+                {{ report.severity_summary["MEDIUM"] }}
+            </strong>
+
+            <p>
+                Medium severity
+            </p>
+
+        </div>
+
+
+        <div class="summary-card low">
+
+            <span>
+                LOW
+            </span>
+
+            <strong>
+                {{ report.severity_summary["LOW"] }}
+            </strong>
+
+            <p>
+                Low severity
+            </p>
+
+        </div>
+
+
+    </section>
+
+
+
+    <!-- SECURITY GATE -->
+
+    <section class="gate-card">
+
+        <h2>
+            Security Gate
+        </h2>
+
+
+        {% if report.security_gate == "BLOCKED" %}
+
+            <div class="gate blocked">
+
+                🚫 BLOCKED
+
+            </div>
+
+            <p>
+
+                Security vulnerabilities were detected.
+                Fix them and scan again.
+
+            </p>
+
+
+        {% elif report.security_gate == "PASS" %}
+
+            <div class="gate passed">
+
+                ✅ PASSED
+
+            </div>
+
+            <p>
+
+                No blocking vulnerabilities
+                were detected.
+
+            </p>
+
+
+        {% else %}
+
+            <div class="gate">
+
+                ⚪ NOT SCANNED
+
+            </div>
+
+        {% endif %}
+
+
+    </section>
+
+
+
+    <!-- BEFORE / AFTER -->
+
+    {% if previous_report %}
+
+    <section class="comparison-card">
+
+        <h2>
+            🔄 Scan Comparison
+        </h2>
+
+
+        <div class="comparison-grid">
+
+
+            <div>
+
+                <span>
+                    PREVIOUS SCAN
+                </span>
+
+                <strong>
+                    {{ previous_report.get(
+                        "total_vulnerabilities",
+                        previous_report.get("findings", []) | length
+                    ) }}
+                </strong>
+
+                <p>
+                    vulnerabilities
+                </p>
+
+            </div>
+
+
+            <div class="comparison-arrow">
+                →
+            </div>
+
+
+            <div>
+
+                <span>
+                    CURRENT SCAN
+                </span>
+
+                <strong>
+                    {{ report.total_vulnerabilities }}
+                </strong>
+
+                <p>
+                    vulnerabilities
+                </p>
+
+            </div>
+
+
+        </div>
+
+
+        {% set old_count =
+            previous_report.get(
+                "total_vulnerabilities",
+                previous_report.get("findings", []) | length
+            )
+        %}
+
+
+        {% set new_count =
+            report.total_vulnerabilities
+        %}
+
+
+        {% if new_count < old_count %}
+
+            <div class="improvement">
+
+                ✅ Security improved!
+
+                {{ old_count - new_count }}
+                vulnerability/vulnerabilities
+                were resolved.
+
+            </div>
+
+
+        {% elif new_count == old_count %}
+
+            <div class="no-improvement">
+
+                ⚠️ Vulnerability count has not changed.
+
+                Review the recommended fixes.
+
+            </div>
+
+
+        {% else %}
+
+            <div class="warning">
+
+                ⚠️ New security issues were detected.
+
+            </div>
+
+        {% endif %}
+
+
+    </section>
+
+    {% endif %}
+
+
+
+    <!-- DETAILED FINDINGS -->
+
+    <div class="section-heading">
+
+        <h2 class="section-title">
+
+            Detailed Vulnerability Report
+
+        </h2>
+
+
+        <span class="finding-count">
+
+            {{ report.findings | length }}
+            findings
+
+        </span>
+
+    </div>
+
+
+
+    {% if report.findings %}
+
+
+        {% for finding in report.findings %}
+
+
+        <article class="finding-card">
+
+
+            <div class="finding-header">
+
+
+                <div>
+
+                    <span
+                        class="severity {{ finding.severity | lower }}"
+                    >
+
+                        {{ finding.severity }}
+
+                    </span>
+
+
+                    <h3>
+                        {{ finding.type }}
+                    </h3>
+
+                </div>
+
+
+                <span class="scanner">
+
+                    {{ finding.scanner }}
+
+                </span>
+
+
+            </div>
+
+
+
+            <div class="finding-details">
+
+
+                <div>
+
+                    <span class="detail-label">
+                        SECURITY RULE
+                    </span>
+
+                    <p>
+                        {{ finding.rule }}
+                    </p>
+
+                </div>
+
+
+                <div>
+
+                    <span class="detail-label">
+                        FILE
+                    </span>
+
+                    <p>
+                        {{ finding.file }}
+                    </p>
+
+                </div>
+
+
+                <div>
+
+                    <span class="detail-label">
+                        LINE
+                    </span>
+
+                    <p>
+                        {{ finding.line }}
+                    </p>
+
+                </div>
+
+
+            </div>
+
+
+
+            <div class="report-section problem-section">
+
+                <div class="report-icon">
+                    ⚠️
+                </div>
+
+
+                <div>
+
+                    <span class="report-title">
+                        WHAT WAS FOUND?
+                    </span>
+
+
+                    <p>
+                        {{ finding.message }}
+                    </p>
+
+                </div>
+
+            </div>
+
+
+
+            <div class="report-section impact-section">
+
+                <div class="report-icon">
+                    🔎
+                </div>
+
+
+                <div>
+
+                    <span class="report-title">
+                        SECURITY IMPACT
+                    </span>
+
+
+                    {% if finding.scanner == "Gitleaks" %}
+
+                    <p>
+
+                        A secret or credential may be
+                        exposed in the source code.
+                        Real credentials should never
+                        be committed to a repository.
+
+                    </p>
+
+
+                    {% elif finding.scanner == "Semgrep" %}
+
+                    <p>
+
+                        The source code contains a
+                        security-sensitive pattern that
+                        should be reviewed and corrected.
+
+                    </p>
+
+
+                    {% elif finding.scanner == "pip-audit" %}
+
+                    <p>
+
+                        A project dependency may contain
+                        a known security vulnerability.
+
+                    </p>
+
+
+                    {% elif finding.scanner == "OWASP ZAP" %}
+
+                    <p>
+
+                        The running web application
+                        contains a potential security
+                        weakness detected during
+                        dynamic testing.
+
+                    </p>
+
+
+                    {% else %}
+
+                    <p>
+
+                        This security issue should be
+                        reviewed before deployment.
+
+                    </p>
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+
+            <div class="report-section fix-section">
+
+                <div class="report-icon">
+                    🛠️
+                </div>
+
+
+                <div>
+
+                    <span class="report-title">
+                        RECOMMENDED FIX
+                    </span>
+
+
+                    <p>
+
+                        {{ finding.recommended_fix }}
+
+                    </p>
+
+                </div>
+
+            </div>
+
+
+
+            <div class="next-action">
+
+                <strong>
+                    NEXT ACTION
+                </strong>
+
+
+                <p>
+
+                    Fix the reported issue, commit the
+                    changes, and click <b>Scan Again</b>
+                    to verify the fix.
+
+                </p>
+
+
+                <code>
+                    python secureci.py
+                </code>
+
+            </div>
+
+
+        </article>
+
+
+        {% endfor %}
+
+
+    {% else %}
+
+
+        <div class="no-findings">
+
+            <div class="success-icon">
+                ✓
+            </div>
+
+
+            <h3>
+                No vulnerabilities detected
+            </h3>
+
+
+            <p>
+
+                SecureCI did not find any reported
+                security vulnerabilities.
+
+            </p>
+
+
+            <div class="success-message">
+
+                🎉 Security Gate is ready for deployment.
+
+            </div>
+
+        </div>
+
+
+    {% endif %}
+
+
+</main>
+
+
+<footer>
+
+    SecureCI — DevSecOps Security Platform
+
+</footer>
+
+
+</body>
+
+</html>
