@@ -1,0 +1,12 @@
+title = "SecureCI Gitleaks Configuration"
+
+[[rules]]
+id = "secureci-demo-secret"
+
+description = "SecureCI demonstration secret"
+
+regex = '''SECURECI_DEMO_SECRET_[A-Za-z0-9]+'''
+
+keywords = [
+    "SECURECI_DEMO_SECRET_"
+]
