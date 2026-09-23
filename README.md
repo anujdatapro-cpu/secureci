@@ -1,103 +1,71 @@
-\# SecureCI
+# SecureCI
 
+## Automated DevSecOps Security Scanner
 
+SecureCI is a local DevSecOps security scanning tool designed to help developers identify common security issues in software repositories.
 
-\## Automated DevSecOps Security Scanner
+SecureCI can scan a public GitHub repository, analyze its files and dependencies, generate a vulnerability report, and display the results through a local web dashboard.
 
+The developer reviews the reported vulnerabilities, fixes them manually, and can run a RESCAN to verify whether the issues have been resolved.
 
+SecureCI does not automatically modify or fix source code.
 
-SecureCI is a local security scanning tool that helps developers find common security problems in their projects before deployment.
+---
 
+## Features
 
+- Public GitHub repository scanning
+- Secret detection using Gitleaks
+- Source-code security scanning using Semgrep
+- Python dependency vulnerability scanning using pip-audit
+- Vulnerability severity classification
+- Security Gate with PASS/BLOCKED status
+- Detailed vulnerability report
+- Vulnerable file identification
+- Local web dashboard
+- RESCAN functionality
+- GitHub Actions security workflows
+- Windows setup script
+- JSON security reports
 
-It can scan a public GitHub repository and generate a security report through a local web dashboard.
+---
 
+## Technology Stack
 
+| Technology | Purpose |
+|---|---|
+| Python | Scanner and backend |
+| Flask | Local web dashboard |
+| HTML | Dashboard interface |
+| CSS | Dashboard styling |
+| JavaScript | Dashboard functionality |
+| Git | Version control |
+| GitHub | Repository hosting |
+| Gitleaks | Secret detection |
+| Semgrep | Source-code security scanning |
+| pip-audit | Dependency vulnerability scanning |
+| GitHub Actions | CI/CD security automation |
 
-\---
+---
 
+## Requirements
 
+Before installing SecureCI, make sure you have:
 
-\## Features
+- Windows 10 or Windows 11
+- Python 3.11 or newer
+- Git
+- Internet connection
 
+The SecureCI setup script installs and verifies the required security tools.
 
+---
 
-SecureCI currently supports:
+## Installation
 
+### 1. Clone the repository
 
+Open PowerShell and run:
 
-\- Secret detection using Gitleaks
-
-\- Source-code security scanning using Semgrep
-
-\- Python dependency vulnerability scanning using pip-audit
-
-\- Security Gate
-
-\- Detailed vulnerability report
-
-\- Local web dashboard
-
-\- GitHub repository scanning
-
-\- Rescan support
-
-
-
-\---
-
-
-
-\## How SecureCI Works
-
-
-
-```text
-
-GitHub Repository
-
-\&#x20;      |
-
-\&#x20;      v
-
-\&#x20;  SecureCI
-
-\&#x20;      |
-
-\&#x20;      +---- Gitleaks
-
-\&#x20;      |
-
-\&#x20;      +---- Semgrep
-
-\&#x20;      |
-
-\&#x20;      +---- pip-audit
-
-\&#x20;      |
-
-\&#x20;      v
-
-\&#x20;Security Report
-
-\&#x20;      |
-
-\&#x20;      v
-
-\&#x20;Security Gate
-
-\&#x20;      |
-
-\&#x20;      +---- PASS
-
-\&#x20;      |
-
-\&#x20;      +---- BLOCKED
-
-\&#x20;      |
-
-\&#x20;      v
-
-\&#x20;Local Dashboard
-
-
+```powershell
+git clone https://github.com/anujdatapro-cpu/secureci.git
