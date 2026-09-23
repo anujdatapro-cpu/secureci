@@ -1,4 +1,5 @@
 from flask import Flask, render_template, redirect, url_for
+
 import json
 import os
 import shutil
@@ -7,8 +8,16 @@ import sys
 from datetime import datetime
 
 
+# ============================================================
+# FLASK APPLICATION
+# ============================================================
+
 app = Flask(__name__)
 
+
+# ============================================================
+# PATH CONFIGURATION
+# ============================================================
 
 BASE_DIRECTORY = os.path.dirname(
     os.path.dirname(
@@ -16,26 +25,34 @@ BASE_DIRECTORY = os.path.dirname(
     )
 )
 
+REPORT_DIRECTORY = os.path.join(
+    BASE_DIRECTORY,
+    "reports"
+)
 
 REPORT_FILE = os.path.join(
-    BASE_DIRECTORY,
-    "reports",
+    REPORT_DIRECTORY,
     "vulnerability-report.json"
 )
 
-
 PREVIOUS_REPORT_FILE = os.path.join(
-    BASE_DIRECTORY,
-    "reports",
+    REPORT_DIRECTORY,
     "previous-report.json"
 )
-
 
 SCANNER_FILE = os.path.join(
     BASE_DIRECTORY,
     "github_scanner.py"
 )
 
+RESCAN_TIMEOUT = 900
+
+RESCAN_IN_PROGRESS = False
+
+
+# ============================================================
+# DEFAULT REPORT
+# ============================================================
 
 def default_report():
 
@@ -43,29 +60,37 @@ def default_report():
         "project": "SecureCI",
         "repository": "No repository scanned",
         "scan_status": "NOT SCANNED",
-
         "total_vulnerabilities": 0,
-
         "severity_summary": {
             "CRITICAL": 0,
             "HIGH": 0,
             "MEDIUM": 0,
             "LOW": 0
         },
-
         "security_gate": "NOT SCANNED",
-
+        "scanner_status": {
+            "status": "NOT SCANNED",
+            "errors": []
+        },
+        "repository_summary": {
+            "files_scanned": 0,
+            "folders_scanned": 0,
+            "vulnerable_files": 0
+        },
+        "file_summary": [],
         "findings": [],
-
         "scan_time": "Not available"
     }
 
+
+# ============================================================
+# LOAD REPORT
+# ============================================================
 
 def load_report():
 
     if not os.path.exists(REPORT_FILE):
         return default_report()
-
 
     try:
 
@@ -76,7 +101,6 @@ def load_report():
         ) as file:
 
             report = json.load(file)
-
 
         report.setdefault(
             "project",
@@ -91,6 +115,14 @@ def load_report():
         report.setdefault(
             "scan_status",
             "COMPLETED"
+        )
+
+        report.setdefault(
+            "scanner_status",
+            {
+                "status": "COMPLETED",
+                "errors": []
+            }
         )
 
         report.setdefault(
@@ -114,15 +146,73 @@ def load_report():
         )
 
         report.setdefault(
+            "repository_summary",
+            {
+                "files_scanned": 0,
+                "folders_scanned": 0,
+                "vulnerable_files": 0
+            }
+        )
+
+        report.setdefault(
+            "file_summary",
+            []
+        )
+
+        report.setdefault(
             "scan_time",
             "Not available"
         )
-
 
         report["total_vulnerabilities"] = len(
             report["findings"]
         )
 
+        severity_summary = {
+            "CRITICAL": 0,
+            "HIGH": 0,
+            "MEDIUM": 0,
+            "LOW": 0
+        }
+
+        for finding in report["findings"]:
+
+            severity = str(
+                finding.get(
+                    "severity",
+                    "MEDIUM"
+                )
+            ).upper()
+
+            if severity in severity_summary:
+                severity_summary[severity] += 1
+
+        report["severity_summary"] = severity_summary
+
+        scanner_status = report.get(
+            "scanner_status",
+            {}
+        )
+
+        scanner_errors = scanner_status.get(
+            "errors",
+            []
+        )
+
+        if (
+            report.get("scan_status") == "FAILED"
+            or scanner_errors
+        ):
+
+            report["security_gate"] = "SCAN ERROR"
+
+        elif report["findings"]:
+
+            report["security_gate"] = "BLOCKED"
+
+        else:
+
+            report["security_gate"] = "PASS"
 
         for finding in report["findings"]:
 
@@ -166,56 +256,155 @@ def load_report():
                 "Review and fix the reported issue."
             )
 
+        if report["scan_time"] == "Not available":
+
+            modified_time = os.path.getmtime(
+                REPORT_FILE
+            )
+
+            report["scan_time"] = datetime.fromtimestamp(
+                modified_time
+            ).strftime(
+                "%d %b %Y, %I:%M %p"
+            )
 
         return report
 
-
     except Exception as error:
 
-        print("Error reading report:")
+        print(
+            "Error reading report:"
+        )
+
         print(error)
 
         return default_report()
 
 
+# ============================================================
+# SAVE PREVIOUS REPORT
+# ============================================================
+
 def save_previous_report():
 
-    if os.path.exists(REPORT_FILE):
+    if not os.path.exists(REPORT_FILE):
+        return
 
-        try:
+    try:
 
-            shutil.copy2(
-                REPORT_FILE,
-                PREVIOUS_REPORT_FILE
-            )
+        os.makedirs(
+            REPORT_DIRECTORY,
+            exist_ok=True
+        )
 
-            print(
-                "Previous security report saved."
-            )
+        shutil.copy2(
+            REPORT_FILE,
+            PREVIOUS_REPORT_FILE
+        )
 
-        except Exception as error:
+        print(
+            "Previous security report saved."
+        )
 
-            print(
-                "Could not save previous report:"
-            )
+    except Exception as error:
 
-            print(error)
+        print(
+            "Could not save previous report:"
+        )
+
+        print(error)
+
+
+# ============================================================
+# RUN RESCAN
+# ============================================================
+
+def save_scan_error_report(repository, message):
+
+    error_report = {
+        "project": "SecureCI",
+        "repository": repository,
+        "scan_status": "FAILED",
+        "security_gate": "SCAN ERROR",
+        "total_vulnerabilities": 0,
+        "severity_summary": {
+            "CRITICAL": 0,
+            "HIGH": 0,
+            "MEDIUM": 0,
+            "LOW": 0
+        },
+        "scanner_status": {
+            "status": "FAILED",
+            "errors": [
+                {
+                    "scanner": "SecureCI",
+                    "message": message
+                }
+            ]
+        },
+        "repository_summary": {
+            "files_scanned": 0,
+            "folders_scanned": 0,
+            "vulnerable_files": 0
+        },
+        "file_summary": [],
+        "findings": [],
+        "scan_time": datetime.now().strftime(
+            "%d %b %Y, %I:%M %p"
+        )
+    }
+
+    os.makedirs(
+        REPORT_DIRECTORY,
+        exist_ok=True
+    )
+
+    with open(
+        REPORT_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            error_report,
+            file,
+            indent=4
+        )
+
 
 
 def run_rescan():
 
-    report = load_report()
+    global RESCAN_IN_PROGRESS
 
-    repository = report.get(
-        "repository",
-        ""
-    )
+    if RESCAN_IN_PROGRESS:
 
-
-    if not repository:
+        print(
+            "A rescan is already running."
+        )
 
         return False
 
+    report = load_report()
+
+    repository = str(
+        report.get(
+            "repository",
+            ""
+        )
+    ).strip()
+
+    if (
+        not repository
+        or repository == "No repository scanned"
+        or repository == "Unknown"
+    ):
+
+        print(
+            "No repository is available for rescan."
+        )
+
+        return False
 
     if not os.path.exists(SCANNER_FILE):
 
@@ -225,44 +414,43 @@ def run_rescan():
 
         return False
 
-
+    # Preserve the exact report that the user saw before
+    # starting the new scan.
     save_previous_report()
 
+    RESCAN_IN_PROGRESS = True
 
     print()
-    print("=" * 55)
+    print("=" * 60)
     print("SECURECI RESCAN STARTED")
-    print("=" * 55)
+    print("=" * 60)
     print()
-    print(
-        "Repository:",
-        repository
-    )
-
+    print("Repository:", repository)
+    print()
 
     try:
 
+        command = [
+            sys.executable,
+            SCANNER_FILE,
+            "--repo-url",
+            repository,
+            "--no-dashboard"
+        ]
+
         result = subprocess.run(
-
-            [
-                sys.executable,
-                SCANNER_FILE
-            ],
-
-            input=repository + "\n",
-
+            command,
             text=True,
-
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
-
-            cwd=BASE_DIRECTORY
+            cwd=BASE_DIRECTORY,
+            timeout=RESCAN_TIMEOUT
         )
-
 
         print()
         print("Scanner output:")
         print(result.stdout)
-
 
         if result.stderr:
 
@@ -270,53 +458,94 @@ def run_rescan():
             print("Scanner messages:")
             print(result.stderr)
 
+        # The scanner writes a report even when a security tool
+        # fails. Never replace that failed state with the old
+        # report or silently show PASS.
+        if not os.path.exists(REPORT_FILE):
 
-        # Add latest scan time to the report
+            print()
+            print("RESCAN FAILED.")
+            print("The scanner did not generate a report.")
 
-        if os.path.exists(REPORT_FILE):
+            save_scan_error_report(
+                repository,
+                "The scanner did not generate a report."
+            )
 
-            try:
+            return False
 
-                with open(
-                    REPORT_FILE,
-                    "r",
-                    encoding="utf-8"
-                ) as file:
+        try:
 
-                    new_report = json.load(file)
+            with open(
+                REPORT_FILE,
+                "r",
+                encoding="utf-8"
+            ) as file:
 
+                new_report = json.load(file)
 
-                new_report["scan_time"] = (
-                    datetime.now().strftime(
-                        "%d %b %Y, %I:%M %p"
-                    )
-                )
+        except Exception as error:
 
+            print()
+            print("RESCAN FAILED.")
+            print("The new report could not be read.")
+            print(error)
 
-                with open(
-                    REPORT_FILE,
-                    "w",
-                    encoding="utf-8"
-                ) as file:
+            save_scan_error_report(
+                repository,
+                f"The new report could not be read: {error}"
+            )
 
-                    json.dump(
-                        new_report,
-                        file,
-                        indent=4
-                    )
+            return False
 
+        new_report["scan_time"] = (
+            datetime.now().strftime(
+                "%d %b %Y, %I:%M %p"
+            )
+        )
 
-            except Exception as error:
+        # Keep the scanner's security decision. Only the timestamp
+        # is owned by the dashboard.
+        with open(
+            REPORT_FILE,
+            "w",
+            encoding="utf-8"
+        ) as file:
 
-                print(
-                    "Could not update scan time:"
-                )
+            json.dump(
+                new_report,
+                file,
+                indent=4
+            )
 
-                print(error)
+        if result.returncode != 0:
 
+            print()
+            print("RESCAN FINISHED WITH SCANNER ERROR.")
+            print(
+                f"Scanner exit code: {result.returncode}"
+            )
+
+            return False
+
+        print()
+        print("RESCAN COMPLETED.")
+        print(
+            f"Security Gate: "
+            f"{new_report.get('security_gate', 'UNKNOWN')}"
+        )
 
         return True
 
+    except subprocess.TimeoutExpired:
+
+        print()
+        print("RESCAN TIMED OUT.")
+        print(
+            f"Timeout: {RESCAN_TIMEOUT} seconds."
+        )
+
+        return False
 
     except Exception as error:
 
@@ -324,8 +553,21 @@ def run_rescan():
         print("RESCAN ERROR")
         print(error)
 
+        save_scan_error_report(
+            repository,
+            f"Rescan error: {error}"
+        )
+
         return False
 
+    finally:
+
+        RESCAN_IN_PROGRESS = False
+
+
+# ============================================================
+# HOME PAGE
+# ============================================================
 
 @app.route("/")
 def home():
@@ -333,7 +575,6 @@ def home():
     report = load_report()
 
     previous_report = None
-
 
     if os.path.exists(
         PREVIOUS_REPORT_FILE
@@ -347,12 +588,13 @@ def home():
                 encoding="utf-8"
             ) as file:
 
-                previous_report = json.load(file)
+                previous_report = json.load(
+                    file
+                )
 
         except Exception:
 
             previous_report = None
-
 
     return render_template(
         "dashboard.html",
@@ -361,18 +603,29 @@ def home():
     )
 
 
+# ============================================================
+# RESCAN ROUTE
+# ============================================================
+
 @app.route(
     "/rescan",
     methods=["POST"]
 )
 def rescan():
 
-    run_rescan()
+    success = run_rescan()
 
     return redirect(
-        url_for("home")
+        url_for(
+            "home",
+            rescan="completed" if success else "failed"
+        )
     )
 
+
+# ============================================================
+# APPLICATION START
+# ============================================================
 
 if __name__ == "__main__":
 

@@ -1,317 +1,1368 @@
+import argparse
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 
-from git import Repo
+
+# ============================================================
+# SECURECI CONFIGURATION
+# ============================================================
+
+BASE_DIRECTORY = Path(__file__).resolve().parent
+
+REPORT_DIRECTORY = BASE_DIRECTORY / "reports"
+
+FINAL_REPORT = REPORT_DIRECTORY / "vulnerability-report.json"
+
+GITLEAKS_REPORT = REPORT_DIRECTORY / "gitleaks-report.json"
+
+SEMGREP_REPORT = REPORT_DIRECTORY / "semgrep-report.json"
+
+PIP_AUDIT_REPORT = REPORT_DIRECTORY / "pip-audit-report.json"
+
+GITLEAKS_CONFIG = BASE_DIRECTORY / ".gitleaks.toml"
+
+# Errors from security tools are tracked separately so SecureCI
+# never reports PASS when a scanner actually failed.
+SCAN_ERRORS = []
 
 
-REPORT_DIRECTORY = "reports"
-FINAL_REPORT = os.path.join(
-    REPORT_DIRECTORY,
-    "vulnerability-report.json"
-)
+# Directories that should not be treated as application source.
+IGNORED_DIRECTORIES = {
+    ".git",
+    ".github",
+    ".idea",
+    ".vscode",
+    "node_modules",
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "dist",
+    "build",
+}
 
 
-def validate_github_url(repo_url):
-    parsed = urlparse(repo_url)
+# File extensions that are normally not useful for
+# source-code security analysis.
+IGNORED_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".webp",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".exe",
+    ".dll",
+    ".so",
+    ".bin",
+    ".pdf",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+}
 
-    return (
-        parsed.scheme in ["http", "https"]
-        and parsed.netloc.lower() == "github.com"
-        and parsed.path.strip("/") != ""
+
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
+def print_header(title):
+
+    print()
+    print("=" * 65)
+    print(title)
+    print("=" * 65)
+
+
+def print_step(number, title):
+
+    print()
+    print("-" * 65)
+    print(f"STEP {number} - {title}")
+    print("-" * 65)
+
+
+def ensure_report_directory():
+
+    REPORT_DIRECTORY.mkdir(
+        parents=True,
+        exist_ok=True
     )
 
 
-def clone_repository(repo_url):
+def reset_scan_state():
 
-    if not validate_github_url(repo_url):
-        raise ValueError(
-            "Please enter a valid public GitHub repository URL."
-        )
+    SCAN_ERRORS.clear()
 
-    scan_directory = tempfile.mkdtemp(
-        prefix="secureci_"
-    )
 
-    print("\n======================================")
-    print("       SECURECI GITHUB SCANNER")
-    print("======================================")
+def record_scan_error(scanner_name, message):
 
-    print("\nRepository:")
-    print(repo_url)
+    SCAN_ERRORS.append({
+        "scanner": scanner_name,
+        "message": message
+    })
 
-    print("\nCloning repository...")
+
+def remove_old_scanner_report(file_path):
 
     try:
-
-        Repo.clone_from(
-            repo_url,
-            scan_directory
-        )
-
-        print("Repository cloned successfully.")
-
-        return scan_directory
-
+        if file_path.exists():
+            file_path.unlink()
     except Exception as error:
-
-        shutil.rmtree(
-            scan_directory,
-            ignore_errors=True
-        )
-
-        raise RuntimeError(
-            f"Unable to clone repository: {error}"
+        record_scan_error(
+            "SecureCI",
+            f"Could not remove old scanner report {file_path.name}: {error}"
         )
 
 
-def run_command(command, working_directory):
-
-    print("\nRunning:")
-    print(" ".join(command))
+def run_command(
+    command,
+    cwd=None,
+    timeout=300
+):
 
     try:
 
         result = subprocess.run(
             command,
-            cwd=working_directory,
-            capture_output=True,
+            cwd=cwd,
             text=True,
-            timeout=300
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=timeout
         )
 
-        return {
-            "return_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr
-        }
-
-    except subprocess.TimeoutExpired:
-
-        return {
-            "return_code": -1,
-            "stdout": "",
-            "stderr": "Scanner timed out."
-        }
+        return result.returncode, result.stdout, result.stderr
 
     except FileNotFoundError:
 
-        return {
-            "return_code": -1,
-            "stdout": "",
-            "stderr": "Scanner is not installed or not available in PATH."
-        }
+        return -1, "", (
+            f"Command not found: {command[0]}"
+        )
+
+    except subprocess.TimeoutExpired:
+
+        return -2, "", (
+            "Command timed out."
+        )
+
+    except Exception as error:
+
+        return -3, "", str(error)
 
 
-def get_severity(value):
+def load_json_file(file_path):
 
-    if not value:
-        return "MEDIUM"
+    if not file_path.exists():
 
-    value = str(value).upper()
-
-    if value in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
-        return value
-
-    if value == "ERROR":
-        return "HIGH"
-
-    if value == "WARNING":
-        return "MEDIUM"
-
-    return "MEDIUM"
-
-
-def parse_semgrep_report(report_file):
-
-    findings = []
-
-    if not os.path.exists(report_file):
-        return findings
+        return None
 
     try:
 
         with open(
-            report_file,
+            file_path,
             "r",
             encoding="utf-8"
         ) as file:
 
-            data = json.load(file)
+            return json.load(file)
 
     except Exception:
 
+        return None
+
+
+def save_json_file(
+    file_path,
+    data
+):
+
+    with open(
+        file_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            data,
+            file,
+            indent=4
+        )
+
+
+# ============================================================
+# GITHUB URL VALIDATION
+# ============================================================
+
+def validate_github_url(repo_url):
+
+    repo_url = repo_url.strip()
+
+    parsed = urlparse(repo_url)
+
+    if parsed.scheme not in {
+        "http",
+        "https"
+    }:
+
+        return False
+
+    if parsed.netloc.lower() != "github.com":
+
+        return False
+
+    path = parsed.path.strip("/")
+
+    parts = path.split("/")
+
+    if len(parts) < 2:
+
+        return False
+
+    return True
+
+
+# ============================================================
+# CLONE REPOSITORY
+# ============================================================
+
+def clone_repository(
+    repo_url,
+    destination
+):
+
+    print(
+        f"Cloning repository..."
+    )
+
+    command = [
+        "git",
+        "clone",
+        "--depth",
+        "1",
+        repo_url,
+        str(destination)
+    ]
+
+    code, stdout, stderr = run_command(
+        command,
+        timeout=180
+    )
+
+    if code != 0:
+
+        print()
+        print("Git clone failed.")
+
+        if stderr:
+            print(stderr)
+
+        return False
+
+    print(
+        "Repository cloned successfully."
+    )
+
+    return True
+
+
+# ============================================================
+# FILE DISCOVERY
+# ============================================================
+
+def discover_files(
+    repository_directory
+):
+
+    files = []
+
+    for root, directories, filenames in os.walk(
+        repository_directory
+    ):
+
+        # Remove ignored directories from traversal.
+        directories[:] = [
+            directory
+            for directory in directories
+            if directory not in IGNORED_DIRECTORIES
+        ]
+
+        for filename in filenames:
+
+            file_path = Path(root) / filename
+
+            try:
+
+                relative_path = file_path.relative_to(
+                    repository_directory
+                )
+
+            except ValueError:
+
+                continue
+
+            if file_path.suffix.lower() in IGNORED_EXTENSIONS:
+
+                continue
+
+            files.append(
+                str(relative_path).replace(
+                    "\\",
+                    "/"
+                )
+            )
+
+    return sorted(files)
+
+
+def count_directories(
+    repository_directory
+):
+
+    count = 0
+
+    for root, directories, filenames in os.walk(
+        repository_directory
+    ):
+
+        directories[:] = [
+            directory
+            for directory in directories
+            if directory not in IGNORED_DIRECTORIES
+        ]
+
+        count += len(directories)
+
+    return count
+
+
+# ============================================================
+# FINDING CREATION
+# ============================================================
+
+def create_finding(
+    scanner,
+    severity,
+    finding_type,
+    rule,
+    file_path,
+    line,
+    message,
+    recommended_fix
+):
+
+    return {
+
+        "scanner": scanner,
+
+        "severity": severity.upper(),
+
+        "type": finding_type,
+
+        "rule": rule,
+
+        "file": file_path,
+
+        "line": line,
+
+        "message": message,
+
+        "recommended_fix": recommended_fix
+
+    }
+
+
+# ============================================================
+# GITLEAKS
+# ============================================================
+
+def scan_with_gitleaks(
+    repository_directory
+):
+
+    print_step(
+        2,
+        "SECRET SCAN - GITLEAKS"
+    )
+
+    findings = []
+
+
+    if not shutil.which("gitleaks"):
+
+        message = "Gitleaks is not installed."
+
+        print(message)
+
+        record_scan_error(
+            "Gitleaks",
+            message
+        )
+
         return findings
 
-    for result in data.get("results", []):
+
+    # Gitleaks v8 uses the target directory as a positional
+    # argument for the "dir" command.
+    command = [
+
+        "gitleaks",
+
+        "dir",
+
+        str(repository_directory),
+
+        "--report-format",
+        "json",
+
+        "--report-path",
+        str(GITLEAKS_REPORT),
+
+        "--redact",
+
+        "--exit-code",
+        "1"
+
+    ]
+
+
+    if GITLEAKS_CONFIG.exists():
+
+        command.extend([
+            "--config",
+            str(GITLEAKS_CONFIG)
+        ])
+
+
+    remove_old_scanner_report(GITLEAKS_REPORT)
+
+    code, stdout, stderr = run_command(
+        command,
+        timeout=300
+    )
+
+    # Code 0 = no leak.
+    # Code 1 = leak detected.
+    # Anything else = scanner failure.
+    if code == 0:
+
+        print(
+            "Gitleaks: PASS"
+        )
+
+    elif code == 1:
+
+        print(
+            "Gitleaks: FINDINGS DETECTED"
+        )
+
+    else:
+
+        message = (
+            stderr.strip()
+            or stdout.strip()
+            or "Gitleaks returned an unexpected exit code."
+        )
+
+        print(
+            "Gitleaks scanner error."
+        )
+
+        print(message)
+
+        record_scan_error(
+            "Gitleaks",
+            message
+        )
+
+        return findings
+
+    raw_results = load_json_file(
+        GITLEAKS_REPORT
+    )
+
+    if raw_results is None:
+
+        message = (
+            "Gitleaks did not produce a valid JSON report."
+        )
+
+        print(message)
+
+        record_scan_error(
+            "Gitleaks",
+            message
+        )
+
+        return findings
+
+
+    if not isinstance(
+        raw_results,
+        list
+    ):
+
+        return findings
+
+
+    for result in raw_results:
+
+        raw_file = result.get(
+            "File",
+            "Unknown"
+        )
+
+
+        # Convert absolute cloned path
+        # into repository-relative path.
+
+        try:
+
+            relative_file = str(
+                Path(raw_file).relative_to(
+                    repository_directory
+                )
+            ).replace(
+                "\\",
+                "/"
+            )
+
+        except ValueError:
+
+            relative_file = raw_file
+
+
+        description = result.get(
+            "Description",
+            "Potential secret detected."
+        )
+
+
+        rule_id = result.get(
+            "RuleID",
+            "gitleaks-secret"
+        )
+
+
+        line = result.get(
+            "StartLine",
+            "Unknown"
+        )
+
+
+        finding = create_finding(
+
+            scanner="Gitleaks",
+
+            severity="HIGH",
+
+            finding_type="Secret Exposure",
+
+            rule=rule_id,
+
+            file_path=relative_file,
+
+            line=line,
+
+            message=description,
+
+            recommended_fix=(
+                "Remove the secret from source code. "
+                "Use environment variables or a secure "
+                "secret manager instead. If this was a "
+                "real credential, rotate or revoke it."
+            )
+
+        )
+
+
+        findings.append(
+            finding
+        )
+
+
+    return findings
+
+
+# ============================================================
+# SEMGREP
+# ============================================================
+
+def scan_with_semgrep(
+    repository_directory
+):
+
+    print_step(
+        3,
+        "SOURCE CODE SCAN - SEMGREP"
+    )
+
+    findings = []
+
+
+    if not shutil.which("semgrep"):
+
+        message = "Semgrep is not installed."
+
+        print(message)
+
+        record_scan_error(
+            "Semgrep",
+            message
+        )
+
+        return findings
+
+
+    # Always remove the previous report first so an old report
+    # can never be mistaken for the current scan result.
+    remove_old_scanner_report(SEMGREP_REPORT)
+
+
+    command = [
+
+        "semgrep",
+
+        "scan",
+
+        "--config",
+        "auto",
+
+        "--json",
+
+        "--quiet",
+
+        "--metrics=on",
+
+        str(repository_directory)
+
+    ]
+
+
+    code, stdout, stderr = run_command(
+        command,
+        timeout=600
+    )
+
+
+    # Semgrep's JSON output is captured directly from stdout.
+    # This avoids relying on a generated file that can sometimes
+    # contain non-JSON console output on Windows/version changes.
+    raw_report = None
+
+    stdout_text = (stdout or "").strip()
+
+
+    if stdout_text:
+
+        try:
+
+            raw_report = json.loads(
+                stdout_text
+            )
+
+        except json.JSONDecodeError:
+
+            # Try to recover if Semgrep surrounded the JSON with
+            # extra console text.
+            first_brace = stdout_text.find("{")
+            last_brace = stdout_text.rfind("}")
+
+            if (
+                first_brace != -1
+                and last_brace > first_brace
+            ):
+
+                candidate = stdout_text[
+                    first_brace:last_brace + 1
+                ]
+
+                try:
+
+                    raw_report = json.loads(
+                        candidate
+                    )
+
+                except json.JSONDecodeError:
+
+                    raw_report = None
+
+
+    if raw_report is not None:
+
+        # Keep a clean JSON copy for debugging/report inspection.
+        save_json_file(
+            SEMGREP_REPORT,
+            raw_report
+        )
+
+
+    # Semgrep normally returns 0 when no findings exist and may
+    # return 1 when findings exist. Any other code is treated as
+    # an execution error.
+    if code == 0:
+
+        print(
+            "Semgrep: PASS"
+        )
+
+    elif code == 1:
+
+        print(
+            "Semgrep: FINDINGS DETECTED"
+        )
+
+    else:
+
+        message = (
+            stderr.strip()
+            or "Semgrep returned an unexpected exit code."
+        )
+
+        print(
+            "Semgrep scanner error."
+        )
+
+        print(message)
+
+        record_scan_error(
+            "Semgrep",
+            message
+        )
+
+        return findings
+
+
+    if raw_report is None:
+
+        message = (
+            "Semgrep completed but did not return valid JSON."
+        )
+
+        if stderr.strip():
+
+            message += (
+                " Details: "
+                + stderr.strip()
+            )
+
+        print(message)
+
+        record_scan_error(
+            "Semgrep",
+            message
+        )
+
+        return findings
+
+
+    if not isinstance(
+        raw_report,
+        dict
+    ):
+
+        message = (
+            "Semgrep returned JSON, but the report format "
+            "was not an object."
+        )
+
+        print(message)
+
+        record_scan_error(
+            "Semgrep",
+            message
+        )
+
+        return findings
+
+
+    results = raw_report.get(
+        "results",
+        []
+    )
+
+
+    if not isinstance(
+        results,
+        list
+    ):
+
+        message = (
+            "Semgrep JSON report is missing a valid results list."
+        )
+
+        print(message)
+
+        record_scan_error(
+            "Semgrep",
+            message
+        )
+
+        return findings
+
+
+    for result in results:
 
         check_id = result.get(
             "check_id",
-            "Unknown Semgrep Rule"
+            "semgrep-rule"
         )
+
 
         path = result.get(
             "path",
-            "Unknown file"
+            "Unknown"
         )
+
 
         start = result.get(
             "start",
             {}
         )
 
+
         line = start.get(
             "line",
-            0
+            "Unknown"
         )
+
 
         extra = result.get(
             "extra",
             {}
         )
 
+
         message = extra.get(
             "message",
-            "Security issue detected by Semgrep."
+            "Semgrep detected a security issue."
         )
 
-        severity = get_severity(
-            extra.get("severity")
+
+        metadata = extra.get(
+            "metadata",
+            {}
         )
 
-        findings.append({
 
-            "scanner": "Semgrep",
+        raw_severity = metadata.get(
+            "severity",
+            "WARNING"
+        )
 
-            "type": "Source Code Vulnerability",
 
-            "rule": check_id,
+        raw_severity = str(
+            raw_severity
+        ).upper()
 
-            "severity": severity,
 
-            "file": path,
+        severity_map = {
 
-            "line": line,
+            "ERROR": "HIGH",
 
-            "message": message,
+            "WARNING": "MEDIUM",
 
-            "status": "OPEN",
+            "INFO": "LOW",
 
-            "recommended_fix":
-                "Review the affected code and "
-                "apply the remediation recommended "
-                "by SecureCI."
-        })
+            "CRITICAL": "CRITICAL",
+
+            "HIGH": "HIGH",
+
+            "MEDIUM": "MEDIUM",
+
+            "LOW": "LOW"
+
+        }
+
+
+        severity = severity_map.get(
+            raw_severity,
+            "MEDIUM"
+        )
+
+
+        recommendation = (
+            "Review the Semgrep finding and modify "
+            "the affected code according to the "
+            "security guidance."
+        )
+
+
+        finding = create_finding(
+
+            scanner="Semgrep",
+
+            severity=severity,
+
+            finding_type="Source Code Security Issue",
+
+            rule=check_id,
+
+            file_path=path,
+
+            line=line,
+
+            message=message,
+
+            recommended_fix=recommendation
+
+        )
+
+
+        findings.append(
+            finding
+        )
+
 
     return findings
 
 
-def parse_gitleaks_report(report_file):
+# ============================================================
+# PYTHON DEPENDENCY SCAN
+# ============================================================
+
+def find_requirements_files(
+    repository_directory
+):
+
+    requirements = []
+
+    for path in repository_directory.rglob(
+        "requirements*.txt"
+    ):
+
+        if any(
+            ignored in path.parts
+            for ignored in IGNORED_DIRECTORIES
+        ):
+
+            continue
+
+        requirements.append(
+            path
+        )
+
+
+    return requirements
+
+
+def scan_with_pip_audit(
+    repository_directory
+):
+
+    print_step(
+        4,
+        "DEPENDENCY SCAN - PIP-AUDIT"
+    )
 
     findings = []
 
-    if not os.path.exists(report_file):
+
+    requirements_files = (
+        find_requirements_files(
+            repository_directory
+        )
+    )
+
+
+    if not requirements_files:
+
+        print(
+            "No requirements.txt file found."
+        )
+
+        print(
+            "Dependency scan skipped."
+        )
+
         return findings
 
-    try:
 
-        with open(
-            report_file,
-            "r",
-            encoding="utf-8"
-        ) as file:
+    if not shutil.which("pip-audit"):
 
-            data = json.load(file)
+        message = "pip-audit is not installed."
 
-    except Exception:
+        print(message)
+
+        record_scan_error(
+            "pip-audit",
+            message
+        )
 
         return findings
 
-    if not isinstance(data, list):
-        return findings
 
-    for leak in data:
+    for requirements_file in requirements_files:
 
-        rule_id = leak.get(
-            "RuleID",
-            "Secret Detection"
+        command = [
+
+            "pip-audit",
+
+            "-r",
+
+            str(requirements_file),
+
+            "--format",
+            "json",
+
+            "--output",
+            str(PIP_AUDIT_REPORT)
+
+        ]
+
+
+        remove_old_scanner_report(PIP_AUDIT_REPORT)
+
+        code, stdout, stderr = run_command(
+            command,
+            timeout=600
         )
 
-        description = leak.get(
-            "Description",
-            "Potential secret detected."
+
+        if code == 0:
+
+            print(
+                f"pip-audit: PASS - "
+                f"{requirements_file.name}"
+            )
+
+        elif code == 1:
+
+            print(
+                f"pip-audit: VULNERABILITIES - "
+                f"{requirements_file.name}"
+            )
+
+        else:
+
+            message = (
+                stderr.strip()
+                or stdout.strip()
+                or "pip-audit returned an unexpected exit code."
+            )
+
+            print(
+                f"pip-audit: scanner error - "
+                f"{requirements_file.name}"
+            )
+
+            print(message)
+
+            record_scan_error(
+                "pip-audit",
+                f"{requirements_file.name}: {message}"
+            )
+
+            continue
+
+
+        raw_report = load_json_file(
+            PIP_AUDIT_REPORT
         )
 
-        file_path = leak.get(
-            "File",
-            "Unknown file"
+
+        if raw_report is None:
+
+            message = (
+                f"pip-audit did not produce a valid JSON report "
+                f"for {requirements_file.name}."
+            )
+
+            print(message)
+
+            record_scan_error(
+                "pip-audit",
+                message
+            )
+
+            continue
+
+
+        dependencies = raw_report.get(
+            "dependencies",
+            []
         )
 
-        line = leak.get(
-            "StartLine",
-            0
-        )
 
-        findings.append({
+        for dependency in dependencies:
 
-            "scanner": "Gitleaks",
+            package_name = dependency.get(
+                "name",
+                "Unknown package"
+            )
 
-            "type": "Secret Exposure",
 
-            "rule": rule_id,
+            package_version = dependency.get(
+                "version",
+                "Unknown version"
+            )
 
-            "severity": "HIGH",
 
-            "file": file_path,
+            vulnerabilities = dependency.get(
+                "vulns",
+                []
+            )
 
-            "line": line,
 
-            "message":
-                "Potential secret or credential "
-                "was detected in the repository.",
+            for vulnerability in vulnerabilities:
 
-            "status": "OPEN",
+                vulnerability_id = vulnerability.get(
+                    "id",
+                    "Known vulnerability"
+                )
 
-            "recommended_fix":
-                "Remove the secret from the source "
-                "code and rotate the exposed credential."
-        })
+
+                fix_versions = vulnerability.get(
+                    "fix_versions",
+                    []
+                )
+
+
+                if fix_versions:
+
+                    fix_text = (
+                        "Upgrade "
+                        f"{package_name} from "
+                        f"{package_version} to a fixed "
+                        "version. Recommended fixed "
+                        f"versions: "
+                        f"{', '.join(fix_versions)}."
+                    )
+
+                else:
+
+                    fix_text = (
+                        "Review the dependency advisory "
+                        "and upgrade to a secure version "
+                        "when a fixed release is available."
+                    )
+
+
+                finding = create_finding(
+
+                    scanner="pip-audit",
+
+                    severity="HIGH",
+
+                    finding_type="Vulnerable Dependency",
+
+                    rule=vulnerability_id,
+
+                    file_path=str(
+                        requirements_file.relative_to(
+                            repository_directory
+                        )
+                    ).replace(
+                        "\\",
+                        "/"
+                    ),
+
+                    line="Dependency",
+
+                    message=(
+                        f"Package {package_name} "
+                        f"{package_version} has known "
+                        f"vulnerability "
+                        f"{vulnerability_id}."
+                    ),
+
+                    recommended_fix=fix_text
+
+                )
+
+
+                findings.append(
+                    finding
+                )
+
 
     return findings
 
 
-def generate_report(
-    repository_url,
-    semgrep_findings,
-    gitleaks_findings
+# ============================================================
+# FILE REPORT
+# ============================================================
+
+def create_file_summary(
+    files,
+    findings
 ):
 
-    all_findings = (
-        semgrep_findings +
-        gitleaks_findings
-    )
+    vulnerable_files = {}
 
-    severity_counts = {
+
+    for finding in findings:
+
+        file_path = finding.get(
+            "file",
+            "Unknown"
+        )
+
+
+        if file_path not in vulnerable_files:
+
+            vulnerable_files[file_path] = []
+
+
+        vulnerable_files[file_path].append(
+            finding
+        )
+
+
+    file_results = []
+
+
+    for file_path in files:
+
+        if file_path in vulnerable_files:
+
+            file_findings = (
+                vulnerable_files[file_path]
+            )
+
+
+            highest_severity = "LOW"
+
+
+            severity_order = {
+
+                "LOW": 1,
+
+                "MEDIUM": 2,
+
+                "HIGH": 3,
+
+                "CRITICAL": 4
+
+            }
+
+
+            for finding in file_findings:
+
+                severity = finding.get(
+                    "severity",
+                    "LOW"
+                )
+
+
+                if severity_order.get(
+                    severity,
+                    1
+                ) > severity_order.get(
+                    highest_severity,
+                    1
+                ):
+
+                    highest_severity = severity
+
+
+            file_results.append({
+
+                "file": file_path,
+
+                "status": "VULNERABLE",
+
+                "severity": highest_severity,
+
+                "issues": len(
+                    file_findings
+                )
+
+            })
+
+        else:
+
+            file_results.append({
+
+                "file": file_path,
+
+                "status": "PASS",
+
+                "severity": "NONE",
+
+                "issues": 0
+
+            })
+
+
+    return file_results
+
+
+# ============================================================
+# FINAL REPORT
+# ============================================================
+
+def build_final_report(
+    repository_url,
+    repository_directory,
+    findings,
+    files,
+    directory_count
+):
+
+    severity_summary = {
 
         "CRITICAL": 0,
+
         "HIGH": 0,
+
         "MEDIUM": 0,
+
         "LOW": 0
+
     }
 
-    for finding in all_findings:
+
+    for finding in findings:
 
         severity = finding.get(
             "severity",
             "MEDIUM"
         )
 
-        if severity in severity_counts:
 
-            severity_counts[severity] += 1
+        if severity in severity_summary:
+
+            severity_summary[severity] += 1
+
+
+    if SCAN_ERRORS:
+
+        security_gate = "SCAN ERROR"
+        scan_status = "FAILED"
+
+    elif findings:
+
+        security_gate = "BLOCKED"
+        scan_status = "COMPLETED"
+
+    else:
+
+        security_gate = "PASS"
+        scan_status = "COMPLETED"
+
+
+    file_summary = create_file_summary(
+        files,
+        findings
+    )
+
 
     report = {
 
@@ -319,249 +1370,624 @@ def generate_report(
 
         "repository": repository_url,
 
-        "scan_status": "COMPLETED",
+        "scan_status": scan_status,
 
-        "total_vulnerabilities":
-            len(all_findings),
+        "security_gate": security_gate,
 
-        "severity_summary":
-            severity_counts,
+        "scanner_status": {
+            "status": "FAILED" if SCAN_ERRORS else "COMPLETED",
+            "errors": SCAN_ERRORS
+        },
 
-        "security_gate":
-            "BLOCKED"
-            if len(all_findings) > 0
-            else "PASS",
+        "total_vulnerabilities": len(
+            findings
+        ),
 
-        "findings":
-            all_findings
+        "severity_summary": severity_summary,
+
+        "repository_summary": {
+
+            "files_scanned": len(files),
+
+            "folders_scanned": directory_count,
+
+            "vulnerable_files": len({
+
+                finding.get(
+                    "file",
+                    "Unknown"
+                )
+
+                for finding in findings
+
+            })
+
+        },
+
+        "file_summary": file_summary,
+
+        "findings": findings
+
     }
 
-    os.makedirs(
-        REPORT_DIRECTORY,
-        exist_ok=True
+
+    save_json_file(
+        FINAL_REPORT,
+        report
     )
 
-    with open(
-        FINAL_REPORT,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            report,
-            file,
-            indent=4
-        )
 
     return report
 
 
-def scan_repository(repo_url):
+# ============================================================
+# DISPLAY RESULTS
+# ============================================================
 
-    repository_directory = None
+def display_results(report):
 
-    try:
+    print_header(
+        "SECURECI SCAN RESULTS"
+    )
 
-        repository_directory = clone_repository(
-            repo_url
+
+    print(
+        f"Files scanned: "
+        f"{report['repository_summary']['files_scanned']}"
+    )
+
+
+    print(
+        f"Folders scanned: "
+        f"{report['repository_summary']['folders_scanned']}"
+    )
+
+
+    print(
+        f"Vulnerable files: "
+        f"{report['repository_summary']['vulnerable_files']}"
+    )
+
+
+    print()
+
+
+    print(
+        f"Total vulnerabilities: "
+        f"{report['total_vulnerabilities']}"
+    )
+
+
+    print(
+        f"CRITICAL: "
+        f"{report['severity_summary']['CRITICAL']}"
+    )
+
+
+    print(
+        f"HIGH: "
+        f"{report['severity_summary']['HIGH']}"
+    )
+
+
+    print(
+        f"MEDIUM: "
+        f"{report['severity_summary']['MEDIUM']}"
+    )
+
+
+    print(
+        f"LOW: "
+        f"{report['severity_summary']['LOW']}"
+    )
+
+
+    print()
+
+
+    print(
+        f"SECURITY GATE: "
+        f"{report['security_gate']}"
+    )
+
+
+    print()
+
+
+    if report.get("scanner_status", {}).get("errors"):
+
+        print_header(
+            "SECURITY SCAN ERROR"
         )
 
-        semgrep_report = os.path.join(
-            repository_directory,
-            "semgrep-report.json"
-        )
+        for error in report["scanner_status"]["errors"]:
 
-        gitleaks_report = os.path.join(
-            repository_directory,
-            "gitleaks-report.json"
-        )
+            print(
+                f"{error['scanner']}: {error['message']}"
+            )
 
-        print("\n======================================")
-        print("        RUNNING SECURITY SCANS")
-        print("======================================")
-
-        # -----------------------------
-        # SEMGREP
-        # -----------------------------
-
-        semgrep_result = run_command(
-
-            [
-                "semgrep",
-                "--config",
-                "auto",
-                "--json",
-                "--output",
-                "semgrep-report.json"
-            ],
-
-            repository_directory
-        )
-
-        # -----------------------------
-        # GITLEAKS
-        # -----------------------------
-
-        gitleaks_result = run_command(
-
-            [
-                "gitleaks",
-                "detect",
-                "--source",
-                ".",
-                "--no-banner",
-                "--report-format",
-                "json",
-                "--report-path",
-                "gitleaks-report.json"
-            ],
-
-            repository_directory
-        )
-
-        # -----------------------------
-        # PARSE RESULTS
-        # -----------------------------
-
-        semgrep_findings = parse_semgrep_report(
-            semgrep_report
-        )
-
-        gitleaks_findings = parse_gitleaks_report(
-            gitleaks_report
-        )
-
-        # -----------------------------
-        # GENERATE UNIFIED REPORT
-        # -----------------------------
-
-        report = generate_report(
-
-            repository_url,
-
-            semgrep_findings,
-
-            gitleaks_findings
-        )
-
-        # -----------------------------
-        # DISPLAY SUMMARY
-        # -----------------------------
-
-        print("\n======================================")
-        print("       SECURECI SCAN RESULTS")
-        print("======================================")
-
+        print()
         print(
-            "\nTotal vulnerabilities:",
-            report["total_vulnerabilities"]
+            "Security Gate: SCAN ERROR"
         )
 
-        print(
-            "\nCRITICAL:",
-            report["severity_summary"]["CRITICAL"]
+    elif report["findings"]:
+
+        print_header(
+            "VULNERABLE FILES"
         )
 
-        print(
-            "HIGH:",
-            report["severity_summary"]["HIGH"]
-        )
 
-        print(
-            "MEDIUM:",
-            report["severity_summary"]["MEDIUM"]
-        )
-
-        print(
-            "LOW:",
-            report["severity_summary"]["LOW"]
-        )
-
-        print(
-            "\nSecurity Gate:",
-            report["security_gate"]
-        )
-
-        print(
-            "\nReport generated:"
-        )
-
-        print(
-            FINAL_REPORT
-        )
-
-        # -----------------------------
-        # SHOW FINDINGS
-        # -----------------------------
-
-        print("\n======================================")
-        print("          VULNERABILITIES")
-        print("======================================")
-
-        for index, finding in enumerate(
+        for number, finding in enumerate(
             report["findings"],
             start=1
         ):
 
             print(
-                f"\n{index}. "
-                f"{finding['scanner']} - "
-                f"{finding['severity']}"
+                f"{number}. "
+                f"{finding['severity']} - "
+                f"{finding['scanner']}"
             )
 
             print(
-                "   Type:",
-                finding["type"]
+                f"   File: "
+                f"{finding['file']}"
             )
 
             print(
-                "   File:",
-                finding["file"]
+                f"   Line: "
+                f"{finding['line']}"
             )
 
             print(
-                "   Line:",
-                finding["line"]
+                f"   Issue: "
+                f"{finding['message']}"
             )
 
             print(
-                "   Message:",
-                finding["message"]
+                f"   Fix: "
+                f"{finding['recommended_fix']}"
             )
 
-            print(
-                "   Recommended Fix:",
-                finding["recommended_fix"]
-            )
+            print()
 
-        return report
+
+    else:
+
+        print_header(
+            "SECURECI RESULT"
+        )
+
+
+        print(
+            "No vulnerabilities detected."
+        )
+
+
+        print(
+            "Security Gate: PASS"
+        )
+
+
+    print()
+
+    print(
+        f"Report generated:"
+    )
+
+    print(
+        FINAL_REPORT
+    )
+
+
+# ============================================================
+# MAIN SCAN
+# ============================================================
+
+def scan_repository(
+    repository_url
+):
+
+    ensure_report_directory()
+
+    reset_scan_state()
+
+
+    if not validate_github_url(
+        repository_url
+    ):
+
+        print()
+        print(
+            "Invalid GitHub repository URL."
+        )
+
+        print(
+            "Example:"
+        )
+
+        print(
+            "https://github.com/user/project"
+        )
+
+        return False
+
+
+    print_header(
+        "SECURECI DEVSECOPS SECURITY SCANNER"
+    )
+
+
+    print(
+        "Repository:"
+    )
+
+    print(
+        repository_url
+    )
+
+
+    temporary_directory = tempfile.mkdtemp(
+        prefix="secureci_"
+    )
+
+
+    repository_directory = (
+        Path(temporary_directory)
+        / "repository"
+    )
+
+
+    try:
+
+        # ----------------------------------------------------
+        # STEP 1 - CLONE
+        # ----------------------------------------------------
+
+        print_step(
+            1,
+            "REPOSITORY CHECK"
+        )
+
+
+        cloned = clone_repository(
+            repository_url,
+            repository_directory
+        )
+
+
+        if not cloned:
+
+            return False
+
+
+        # ----------------------------------------------------
+        # DISCOVER FILES
+        # ----------------------------------------------------
+
+        print()
+        print(
+            "Discovering repository files..."
+        )
+
+
+        files = discover_files(
+            repository_directory
+        )
+
+
+        directory_count = count_directories(
+            repository_directory
+        )
+
+
+        print(
+            f"Files discovered: "
+            f"{len(files)}"
+        )
+
+
+        print(
+            f"Folders discovered: "
+            f"{directory_count}"
+        )
+
+
+        # ----------------------------------------------------
+        # SECURITY SCANNERS
+        # ----------------------------------------------------
+
+        all_findings = []
+
+
+        gitleaks_findings = (
+            scan_with_gitleaks(
+                repository_directory
+            )
+        )
+
+
+        all_findings.extend(
+            gitleaks_findings
+        )
+
+
+        semgrep_findings = (
+            scan_with_semgrep(
+                repository_directory
+            )
+        )
+
+
+        all_findings.extend(
+            semgrep_findings
+        )
+
+
+        pip_findings = (
+            scan_with_pip_audit(
+                repository_directory
+            )
+        )
+
+
+        all_findings.extend(
+            pip_findings
+        )
+
+
+        # ----------------------------------------------------
+        # FINAL REPORT
+        # ----------------------------------------------------
+
+        print_step(
+            5,
+            "BUILD SECURITY REPORT"
+        )
+
+
+        report = build_final_report(
+
+            repository_url,
+
+            repository_directory,
+
+            all_findings,
+
+            files,
+
+            directory_count
+
+        )
+
+
+        display_results(
+            report
+        )
+
+
+        # A scanner failure is a failed scan, even if another
+        # scanner found no vulnerabilities.
+        return not SCAN_ERRORS
+
 
     finally:
 
-        if repository_directory:
+        try:
 
             shutil.rmtree(
-                repository_directory,
+                temporary_directory,
                 ignore_errors=True
             )
+
+        except Exception:
+
+            pass
+
+
+# ============================================================
+# AUTOMATIC DASHBOARD START
+# ============================================================
+
+def start_dashboard():
+
+    print()
+    print_header(
+        "STARTING SECURECI DASHBOARD"
+    )
+
+    dashboard_file = (
+        BASE_DIRECTORY
+        / "app"
+        / "app.py"
+    )
+
+    if not dashboard_file.exists():
+
+        print()
+        print(
+            "ERROR: Dashboard file not found."
+        )
+
+        print(
+            f"Expected location: {dashboard_file}"
+        )
+
+        print()
+
+        return False
+
+    try:
+
+        import sys
+        import time
+        import webbrowser
+
+        print(
+            "Starting Flask dashboard..."
+        )
+
+        dashboard_process = subprocess.Popen(
+
+            [
+                sys.executable,
+                str(dashboard_file)
+            ],
+
+            cwd=str(
+                BASE_DIRECTORY
+            )
+
+        )
+
+        # Give Flask time to start.
+        time.sleep(2)
+
+        dashboard_url = (
+            "http://127.0.0.1:5000"
+        )
+
+        print()
+        print(
+            "Dashboard started successfully."
+        )
+
+        print(
+            "Opening:"
+        )
+
+        print(
+            dashboard_url
+        )
+
+        # Automatically open the default browser.
+        webbrowser.open(
+            dashboard_url
+        )
+
+        print()
+        print_header(
+            "SECURECI IS RUNNING"
+        )
+
+        print(
+            "Security scan completed."
+        )
+
+        print()
+        print(
+            "Dashboard:"
+        )
+
+        print(
+            dashboard_url
+        )
+
+        print()
+        print(
+            "Keep this terminal open while using SecureCI."
+        )
+
+        print(
+            "Press CTRL+C to stop SecureCI."
+        )
+
+        print()
+
+        try:
+
+            dashboard_process.wait()
+
+        except KeyboardInterrupt:
+
+            print()
+            print(
+                "Stopping SecureCI dashboard..."
+            )
+
+            try:
+
+                dashboard_process.terminate()
+
+            except Exception:
+
+                pass
+
+            print(
+                "SecureCI stopped."
+            )
+
+        return True
+
+    except Exception as error:
+
+        print()
+        print(
+            "ERROR: Could not start SecureCI dashboard."
+        )
+
+        print(
+            f"Details: {error}"
+        )
+
+        print()
+
+        return False
+
+
+# ============================================================
+# PROGRAM START
+# ============================================================
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description="SecureCI GitHub repository security scanner."
+    )
+
+    parser.add_argument(
+        "--repo-url",
+        dest="repo_url",
+        help="Public GitHub repository URL to scan."
+    )
+
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Scan only. Do not start the Flask dashboard."
+    )
+
+    args = parser.parse_args()
+
+    repository_url = (
+        args.repo_url.strip()
+        if args.repo_url
+        else input(
+            "Enter public GitHub repository URL: "
+        ).strip()
+    )
+
+    if not repository_url:
+
+        print(
+            "Repository URL is required."
+        )
+
+        return 2
+
+    scan_success = scan_repository(
+        repository_url
+    )
+
+    if scan_success and not args.no_dashboard:
+
+        start_dashboard()
+
+    return 0 if scan_success else 1
 
 
 if __name__ == "__main__":
 
-    repository_url = input(
-        "\nEnter public GitHub repository URL: "
-    ).strip()
-
-    try:
-
-        scan_repository(
-            repository_url
-        )
-
-    except Exception as error:
-
-        print("\n======================================")
-        print("          SECURECI ERROR")
-        print("======================================")
-
-        print(error)
+    sys.exit(
+        main()
+    )

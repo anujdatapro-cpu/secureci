@@ -1,0 +1,40 @@
+﻿# Python virtual environments
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest cache
+.pytest_cache/
+
+# Environment files
+.env
+.env.*
+
+# SecureCI generated reports
+reports/*.json
+
+# Temporary scan directories
+scans/*
+
+# Keep folder structure
+!reports/.gitkeep
+!scans/.gitkeep
+
+# IDE files
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Python build files
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
