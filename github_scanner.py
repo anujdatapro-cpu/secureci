@@ -331,6 +331,31 @@ def discover_files(
     return sorted(files)
 
 
+def normalize_repository_path(
+    repository_directory,
+    file_path
+):
+
+    """Return a clean repository-relative path for dashboard reports."""
+
+    if not file_path:
+        return "Unknown"
+
+    try:
+        path = Path(str(file_path))
+
+        if path.is_absolute():
+            try:
+                path = path.relative_to(repository_directory)
+            except ValueError:
+                pass
+
+        return str(path).replace("\\", "/")
+
+    except Exception:
+        return str(file_path).replace("\\", "/")
+
+
 def count_directories(
     repository_directory
 ):
@@ -825,9 +850,15 @@ def scan_with_semgrep(
         )
 
 
-        path = result.get(
+        raw_path = result.get(
             "path",
             "Unknown"
+        )
+
+
+        path = normalize_repository_path(
+            repository_directory,
+            raw_path
         )
 
 
