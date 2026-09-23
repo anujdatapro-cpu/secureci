@@ -1,705 +1,427 @@
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>SecureCI Security Dashboard</title>
-
-    <link
-        rel="stylesheet"
-        href="{{ url_for('static', filename='style.css') }}"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#070a12">
+    <title>SecureCI — Security Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
-
 <body>
-
-
-<header class="header">
-
-    <h1>SECURECI</h1>
-
-    <p>
-        Automated DevSecOps Security Dashboard
-    </p>
-
-</header>
-
-
-<main class="container">
-
-
-    <!-- PROJECT -->
-
-    <section class="project-card">
-
-        <div>
-
-            <span class="label">
-                PROJECT
-            </span>
-
-            <h2>
-                {{ report.project }}
-            </h2>
-
-        </div>
-
-
-        <div>
-
-            <span class="label">
-                REPOSITORY
-            </span>
-
-            <p class="repository">
-                {{ report.repository }}
-            </p>
-
-        </div>
-
-
-        <div>
-
-            <span class="label">
-                LAST SCAN
-            </span>
-
-            <p class="scan-status">
-                {{ report.scan_time }}
-            </p>
-
-        </div>
-
-    </section>
-
-
-
-    <!-- SCAN AGAIN -->
-
-    <section class="rescan-top">
-
-        <div>
-
-            <h2>
-                Security Scan
-            </h2>
-
-            <p>
-                Run SecureCI again after fixing
-                the reported vulnerabilities.
-            </p>
-
-        </div>
-
-
-        <form
-            action="/rescan"
-            method="POST"
-        >
-
-            <button
-                type="submit"
-                class="rescan-button"
-                onclick="this.innerText='Scanning...'; this.disabled=true;"
-            >
-
-                🔄 Scan Again
-
-            </button>
-
-        </form>
-
-    </section>
-
-
-
-    <!-- SUMMARY -->
-
-    <h2 class="section-title">
-        Security Summary
-    </h2>
-
-
-    <section class="summary-grid">
-
-
-        <div class="summary-card">
-
-            <span>
-                TOTAL
-            </span>
-
-            <strong>
-                {{ report.total_vulnerabilities }}
-            </strong>
-
-            <p>
-                Vulnerabilities
-            </p>
-
-        </div>
-
-
-        <div class="summary-card critical">
-
-            <span>
-                CRITICAL
-            </span>
-
-            <strong>
-                {{ report.severity_summary["CRITICAL"] }}
-            </strong>
-
-            <p>
-                Critical issues
-            </p>
-
-        </div>
-
-
-        <div class="summary-card high">
-
-            <span>
-                HIGH
-            </span>
-
-            <strong>
-                {{ report.severity_summary["HIGH"] }}
-            </strong>
-
-            <p>
-                High severity
-            </p>
-
-        </div>
-
-
-        <div class="summary-card medium">
-
-            <span>
-                MEDIUM
-            </span>
-
-            <strong>
-                {{ report.severity_summary["MEDIUM"] }}
-            </strong>
-
-            <p>
-                Medium severity
-            </p>
-
-        </div>
-
-
-        <div class="summary-card low">
-
-            <span>
-                LOW
-            </span>
-
-            <strong>
-                {{ report.severity_summary["LOW"] }}
-            </strong>
-
-            <p>
-                Low severity
-            </p>
-
-        </div>
-
-
-    </section>
-
-
-
-    <!-- SECURITY GATE -->
-
-    <section class="gate-card">
-
-        <h2>
-            Security Gate
-        </h2>
-
-
-        {% if report.security_gate == "BLOCKED" %}
-
-            <div class="gate blocked">
-
-                🚫 BLOCKED
-
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <div class="grid-overlay"></div>
+
+    {% set gate = report.get('security_gate', 'NOT SCANNED') %}
+    {% set total = report.get('total_vulnerabilities', 0) %}
+    {% set critical = report.get('severity_summary', {}).get('CRITICAL', 0) %}
+    {% set high = report.get('severity_summary', {}).get('HIGH', 0) %}
+    {% set medium = report.get('severity_summary', {}).get('MEDIUM', 0) %}
+    {% set low = report.get('severity_summary', {}).get('LOW', 0) %}
+    {% set repo_summary = report.get('repository_summary', {}) %}
+    {% set scanner_status = report.get('scanner_status', {}) %}
+    {% set scan_status = report.get('scan_status', 'NOT SCANNED') %}
+
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">
+                <span class="brand-core"></span>
             </div>
-
-            <p>
-
-                Security vulnerabilities were detected.
-                Fix them and scan again.
-
-            </p>
-
-
-        {% elif report.security_gate == "PASS" %}
-
-            <div class="gate passed">
-
-                ✅ PASSED
-
-            </div>
-
-            <p>
-
-                No blocking vulnerabilities
-                were detected.
-
-            </p>
-
-
-        {% else %}
-
-            <div class="gate">
-
-                ⚪ NOT SCANNED
-
-            </div>
-
-        {% endif %}
-
-
-    </section>
-
-
-
-    <!-- BEFORE / AFTER -->
-
-    {% if previous_report %}
-
-    <section class="comparison-card">
-
-        <h2>
-            🔄 Scan Comparison
-        </h2>
-
-
-        <div class="comparison-grid">
-
-
             <div>
+                <div class="brand-name">SECURE<span>CI</span></div>
+                <div class="brand-subtitle">DEVSECOPS SECURITY PLATFORM</div>
+            </div>
+        </div>
 
-                <span>
-                    PREVIOUS SCAN
-                </span>
+        <div class="topbar-status">
+            <span class="live-dot"></span>
+            <span>SECURITY MONITOR</span>
+            <span class="topbar-divider"></span>
+            <span class="topbar-time" id="liveClock">--:--:--</span>
+        </div>
+    </header>
 
-                <strong>
-                    {{ previous_report.get(
-                        "total_vulnerabilities",
-                        previous_report.get("findings", []) | length
-                    ) }}
-                </strong>
+    <main class="dashboard-shell">
+
+        <section class="hero reveal">
+            <div class="hero-copy">
+                <div class="eyebrow">
+                    <span class="eyebrow-line"></span>
+                    SECURITY ANALYSIS
+                </div>
+
+                <h1>Repository <span>Security Center</span></h1>
 
                 <p>
-                    vulnerabilities
+                    Automated security analysis for source code, secrets and dependencies.
+                    Review findings before your code reaches production.
                 </p>
 
+                <div class="repo-pill">
+                    <span class="repo-icon">⌘</span>
+                    <span class="repo-url">{{ report.get('repository', 'No repository scanned') }}</span>
+                </div>
             </div>
 
-
-            <div class="comparison-arrow">
-                →
-            </div>
-
-
-            <div>
-
-                <span>
-                    CURRENT SCAN
-                </span>
-
-                <strong>
-                    {{ report.total_vulnerabilities }}
-                </strong>
-
-                <p>
-                    vulnerabilities
-                </p>
-
-            </div>
-
-
-        </div>
-
-
-        {% set old_count =
-            previous_report.get(
-                "total_vulnerabilities",
-                previous_report.get("findings", []) | length
-            )
-        %}
-
-
-        {% set new_count =
-            report.total_vulnerabilities
-        %}
-
-
-        {% if new_count < old_count %}
-
-            <div class="improvement">
-
-                ✅ Security improved!
-
-                {{ old_count - new_count }}
-                vulnerability/vulnerabilities
-                were resolved.
-
-            </div>
-
-
-        {% elif new_count == old_count %}
-
-            <div class="no-improvement">
-
-                ⚠️ Vulnerability count has not changed.
-
-                Review the recommended fixes.
-
-            </div>
-
-
-        {% else %}
-
-            <div class="warning">
-
-                ⚠️ New security issues were detected.
-
-            </div>
-
-        {% endif %}
-
-
-    </section>
-
-    {% endif %}
-
-
-
-    <!-- DETAILED FINDINGS -->
-
-    <div class="section-heading">
-
-        <h2 class="section-title">
-
-            Detailed Vulnerability Report
-
-        </h2>
-
-
-        <span class="finding-count">
-
-            {{ report.findings | length }}
-            findings
-
-        </span>
-
-    </div>
-
-
-
-    {% if report.findings %}
-
-
-        {% for finding in report.findings %}
-
-
-        <article class="finding-card">
-
-
-            <div class="finding-header">
-
-
-                <div>
-
-                    <span
-                        class="severity {{ finding.severity | lower }}"
-                    >
-
-                        {{ finding.severity }}
-
-                    </span>
-
-
-                    <h3>
-                        {{ finding.type }}
-                    </h3>
-
+            <div class="hero-meta">
+                <div class="meta-card">
+                    <span class="meta-label">SCAN STATUS</span>
+                    <strong class="status-value">{{ scan_status }}</strong>
+                    <span class="meta-small">{{ report.get('scan_time', 'Not available') }}</span>
                 </div>
 
-
-                <span class="scanner">
-
-                    {{ finding.scanner }}
-
-                </span>
-
-
+                <div class="meta-card">
+                    <span class="meta-label">ENGINES</span>
+                    <strong class="status-value">3 ACTIVE</strong>
+                    <span class="meta-small">Gitleaks · Semgrep · pip-audit</span>
+                </div>
             </div>
+        </section>
 
+        <section class="metrics-grid reveal reveal-delay-1">
+            <article class="metric-card metric-total">
+                <div class="metric-top">
+                    <span class="metric-label">TOTAL FINDINGS</span>
+                    <span class="metric-icon">◈</span>
+                </div>
+                <strong class="metric-number counter" data-value="{{ total }}">0</strong>
+                <p>Security issues detected</p>
+                <div class="metric-line"><span style="width: {{ [total * 2, 100] | min }}%;"></span></div>
+            </article>
 
+            <article class="metric-card metric-critical">
+                <div class="metric-top">
+                    <span class="metric-label">CRITICAL</span>
+                    <span class="metric-icon">!</span>
+                </div>
+                <strong class="metric-number counter" data-value="{{ critical }}">0</strong>
+                <p>Immediate attention</p>
+                <div class="metric-line"><span style="width: {{ [critical * 12, 100] | min }}%;"></span></div>
+            </article>
 
-            <div class="finding-details">
+            <article class="metric-card metric-high">
+                <div class="metric-top">
+                    <span class="metric-label">HIGH</span>
+                    <span class="metric-icon">▲</span>
+                </div>
+                <strong class="metric-number counter" data-value="{{ high }}">0</strong>
+                <p>High severity issues</p>
+                <div class="metric-line"><span style="width: {{ [high * 3, 100] | min }}%;"></span></div>
+            </article>
 
+            <article class="metric-card metric-medium">
+                <div class="metric-top">
+                    <span class="metric-label">MEDIUM</span>
+                    <span class="metric-icon">◆</span>
+                </div>
+                <strong class="metric-number counter" data-value="{{ medium }}">0</strong>
+                <p>Medium severity issues</p>
+                <div class="metric-line"><span style="width: {{ [medium * 5, 100] | min }}%;"></span></div>
+            </article>
 
-                <div>
+            <article class="metric-card metric-low">
+                <div class="metric-top">
+                    <span class="metric-label">LOW</span>
+                    <span class="metric-icon">●</span>
+                </div>
+                <strong class="metric-number counter" data-value="{{ low }}">0</strong>
+                <p>Low severity issues</p>
+                <div class="metric-line"><span style="width: {{ [low * 8, 100] | min }}%;"></span></div>
+            </article>
+        </section>
 
-                    <span class="detail-label">
-                        SECURITY RULE
-                    </span>
+        <section class="main-grid reveal reveal-delay-2">
 
-                    <p>
-                        {{ finding.rule }}
-                    </p>
-
+            <article class="gate-panel {% if gate == 'BLOCKED' %}is-blocked{% elif gate == 'PASS' %}is-passed{% else %}is-idle{% endif %}">
+                <div class="panel-heading">
+                    <div>
+                        <span class="panel-kicker">POLICY ENFORCEMENT</span>
+                        <h2>Security Gate</h2>
+                    </div>
+                    <span class="panel-chip">AUTOMATED</span>
                 </div>
 
-
-                <div>
-
-                    <span class="detail-label">
-                        FILE
-                    </span>
-
-                    <p>
-                        {{ finding.file }}
-                    </p>
-
+                <div class="gate-orbit">
+                    <div class="gate-ring ring-one"></div>
+                    <div class="gate-ring ring-two"></div>
+                    <div class="gate-core">
+                        {% if gate == 'BLOCKED' %}
+                            <span class="gate-symbol">!</span>
+                            <strong>BLOCKED</strong>
+                            <small>SECURITY ISSUES FOUND</small>
+                        {% elif gate == 'PASS' %}
+                            <span class="gate-symbol">✓</span>
+                            <strong>PASS</strong>
+                            <small>NO BLOCKING ISSUES</small>
+                        {% elif gate == 'SCAN ERROR' %}
+                            <span class="gate-symbol">×</span>
+                            <strong>ERROR</strong>
+                            <small>SCAN REQUIRES REVIEW</small>
+                        {% else %}
+                            <span class="gate-symbol">○</span>
+                            <strong>NOT SCANNED</strong>
+                            <small>AWAITING SECURITY SCAN</small>
+                        {% endif %}
+                    </div>
                 </div>
 
-
-                <div>
-
-                    <span class="detail-label">
-                        LINE
-                    </span>
-
-                    <p>
-                        {{ finding.line }}
-                    </p>
-
-                </div>
-
-
-            </div>
-
-
-
-            <div class="report-section problem-section">
-
-                <div class="report-icon">
-                    ⚠️
-                </div>
-
-
-                <div>
-
-                    <span class="report-title">
-                        WHAT WAS FOUND?
-                    </span>
-
-
-                    <p>
-                        {{ finding.message }}
-                    </p>
-
-                </div>
-
-            </div>
-
-
-
-            <div class="report-section impact-section">
-
-                <div class="report-icon">
-                    🔎
-                </div>
-
-
-                <div>
-
-                    <span class="report-title">
-                        SECURITY IMPACT
-                    </span>
-
-
-                    {% if finding.scanner == "Gitleaks" %}
-
-                    <p>
-
-                        A secret or credential may be
-                        exposed in the source code.
-                        Real credentials should never
-                        be committed to a repository.
-
-                    </p>
-
-
-                    {% elif finding.scanner == "Semgrep" %}
-
-                    <p>
-
-                        The source code contains a
-                        security-sensitive pattern that
-                        should be reviewed and corrected.
-
-                    </p>
-
-
-                    {% elif finding.scanner == "pip-audit" %}
-
-                    <p>
-
-                        A project dependency may contain
-                        a known security vulnerability.
-
-                    </p>
-
-
-                    {% elif finding.scanner == "OWASP ZAP" %}
-
-                    <p>
-
-                        The running web application
-                        contains a potential security
-                        weakness detected during
-                        dynamic testing.
-
-                    </p>
-
-
+                <div class="gate-message">
+                    {% if gate == 'BLOCKED' %}
+                        Vulnerabilities were detected. Fix the reported issues and perform a new security scan.
+                    {% elif gate == 'PASS' %}
+                        No blocking security vulnerabilities were detected in the scanned repository.
+                    {% elif gate == 'SCAN ERROR' %}
+                        The security scan reported an execution error. Review the scanner output before proceeding.
                     {% else %}
-
-                    <p>
-
-                        This security issue should be
-                        reviewed before deployment.
-
-                    </p>
-
+                        Run SecureCI against a GitHub repository to generate a security decision.
                     {% endif %}
+                </div>
+            </article>
 
+            <article class="distribution-panel">
+                <div class="panel-heading">
+                    <div>
+                        <span class="panel-kicker">RISK DISTRIBUTION</span>
+                        <h2>Severity Analysis</h2>
+                    </div>
+                    <span class="panel-chip">{{ total }} FINDINGS</span>
                 </div>
 
+                <div class="severity-chart">
+                    {% set severity_rows = [
+                        ('CRITICAL', critical, 'critical'),
+                        ('HIGH', high, 'high'),
+                        ('MEDIUM', medium, 'medium'),
+                        ('LOW', low, 'low')
+                    ] %}
+
+                    {% for name, count, tone in severity_rows %}
+                        {% if total > 0 %}
+                            {% set percent = (count * 100 / total) | round(0, 'ceil') %}
+                        {% else %}
+                            {% set percent = 0 %}
+                        {% endif %}
+
+                        <div class="severity-row">
+                            <div class="severity-row-head">
+                                <span class="severity-name {{ tone }}">{{ name }}</span>
+                                <span class="severity-count">{{ count }} <small>{{ percent }}%</small></span>
+                            </div>
+                            <div class="severity-track">
+                                <span class="severity-fill {{ tone }}" data-width="{{ percent }}%"></span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="scan-footprint">
+                    <div>
+                        <span>FILES SCANNED</span>
+                        <strong>{{ repo_summary.get('files_scanned', 0) }}</strong>
+                    </div>
+                    <div>
+                        <span>FOLDERS</span>
+                        <strong>{{ repo_summary.get('folders_scanned', 0) }}</strong>
+                    </div>
+                    <div>
+                        <span>VULNERABLE FILES</span>
+                        <strong>{{ repo_summary.get('vulnerable_files', 0) }}</strong>
+                    </div>
+                </div>
+            </article>
+
+        </section>
+
+        <section class="engine-strip reveal reveal-delay-3">
+            <div class="engine-intro">
+                <span class="panel-kicker">SECURITY ENGINES</span>
+                <strong>Multi-layer repository analysis</strong>
             </div>
 
-
-
-            <div class="report-section fix-section">
-
-                <div class="report-icon">
-                    🛠️
+            <div class="engine-list">
+                <div class="engine-item">
+                    <span class="engine-status"></span>
+                    <div>
+                        <strong>GITLEAKS</strong>
+                        <small>Secret Detection</small>
+                    </div>
                 </div>
 
+                <div class="engine-item">
+                    <span class="engine-status"></span>
+                    <div>
+                        <strong>SEMGREP</strong>
+                        <small>Static Analysis</small>
+                    </div>
+                </div>
 
+                <div class="engine-item">
+                    <span class="engine-status"></span>
+                    <div>
+                        <strong>PIP-AUDIT</strong>
+                        <small>Dependency Audit</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="scanner-state {% if scanner_status.get('status') == 'FAILED' %}scanner-error{% endif %}">
+                <span class="scanner-state-dot"></span>
+                <span>{{ scanner_status.get('status', 'COMPLETED') }}</span>
+            </div>
+        </section>
+
+        <section class="findings-section reveal reveal-delay-4">
+            <div class="section-header">
                 <div>
-
-                    <span class="report-title">
-                        RECOMMENDED FIX
-                    </span>
-
-
-                    <p>
-
-                        {{ finding.recommended_fix }}
-
-                    </p>
-
+                    <span class="panel-kicker">SECURITY REPORT</span>
+                    <h2>Detailed Findings</h2>
+                    <p>Review each detected issue, its location and recommended remediation.</p>
                 </div>
-
+                <div class="findings-badge">
+                    <span>{{ report.findings | length }}</span>
+                    FINDINGS
+                </div>
             </div>
 
+            {% if report.findings %}
+                <div class="findings-list">
+                    {% for finding in report.findings %}
+                        <article class="finding-card">
+                            <div class="finding-accent {{ finding.get('severity', 'MEDIUM') | lower }}"></div>
 
+                            <div class="finding-main">
+                                <div class="finding-top">
+                                    <div class="finding-title">
+                                        <div class="finding-badges">
+                                            <span class="severity-badge {{ finding.get('severity', 'MEDIUM') | lower }}">
+                                                {{ finding.get('severity', 'MEDIUM') }}
+                                            </span>
+                                            <span class="scanner-badge">{{ finding.get('scanner', 'Security Scanner') }}</span>
+                                        </div>
+                                        <h3>{{ finding.get('type', 'Security Vulnerability') }}</h3>
+                                    </div>
 
-            <div class="next-action">
+                                    <div class="finding-number">
+                                        #{{ loop.index }}
+                                    </div>
+                                </div>
 
-                <strong>
-                    NEXT ACTION
-                </strong>
+                                <div class="finding-meta">
+                                    <div class="finding-meta-item">
+                                        <span>RULE</span>
+                                        <strong>{{ finding.get('rule', 'Security Rule') }}</strong>
+                                    </div>
+                                    <div class="finding-meta-item wide">
+                                        <span>FILE</span>
+                                        <strong title="{{ finding.get('file', 'Unknown') }}">{{ finding.get('file', 'Unknown') }}</strong>
+                                    </div>
+                                    <div class="finding-meta-item">
+                                        <span>LINE</span>
+                                        <strong>{{ finding.get('line', 'Unknown') }}</strong>
+                                    </div>
+                                </div>
 
+                                <div class="finding-body">
+                                    <div class="finding-explanation">
+                                        <span class="body-label">DETECTED ISSUE</span>
+                                        <p>{{ finding.get('message', 'A security issue was detected.') }}</p>
+                                    </div>
 
+                                    <div class="finding-fix">
+                                        <span class="body-label">RECOMMENDED FIX</span>
+                                        <p>{{ finding.get('recommended_fix', 'Review and fix the reported issue.') }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="clean-state">
+                    <div class="clean-orbit">
+                        <div class="clean-ring"></div>
+                        <div class="clean-icon">✓</div>
+                    </div>
+                    <span class="clean-label">SECURITY CLEAR</span>
+                    <h3>No vulnerabilities detected</h3>
+                    <p>SecureCI did not identify any reported security issues in this scan.</p>
+                    <div class="clean-status">
+                        <span></span>
+                        SECURITY GATE · PASS
+                    </div>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="demo-note reveal reveal-delay-5">
+            <div class="demo-icon">↻</div>
+            <div>
+                <span class="panel-kicker">NEXT SECURITY ACTION</span>
+                <h3>Fix findings manually, then run a fresh scan</h3>
                 <p>
-
-                    Fix the reported issue, commit the
-                    changes, and click <b>Scan Again</b>
-                    to verify the fix.
-
+                    SecureCI reports the issues but does not automatically modify developer code.
+                    After fixing the repository, run the scanner again to verify the new security state.
                 </p>
-
-
-                <code>
-                    python secureci.py
-                </code>
-
             </div>
+        </section>
 
+    </main>
 
-        </article>
+    <footer class="footer">
+        <div class="footer-brand">SECURE<span>CI</span></div>
+        <p>DevSecOps Security Platform · Local Security Analysis</p>
+        <span class="footer-version">SECURE PIPELINE</span>
+    </footer>
 
+    <script>
+        (() => {
+            const clock = document.getElementById("liveClock");
 
-        {% endfor %}
+            function updateClock() {
+                if (!clock) return;
+                const now = new Date();
+                clock.textContent = now.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit"
+                });
+            }
 
+            updateClock();
+            setInterval(updateClock, 1000);
 
-    {% else %}
+            const counters = document.querySelectorAll(".counter");
 
+            counters.forEach((counter) => {
+                const target = Number(counter.dataset.value || 0);
+                const duration = 850;
+                const start = performance.now();
 
-        <div class="no-findings">
+                function tick(time) {
+                    const progress = Math.min((time - start) / duration, 1);
+                    const eased = 1 - Math.pow(1 - progress, 3);
+                    counter.textContent = Math.round(target * eased);
 
-            <div class="success-icon">
-                ✓
-            </div>
+                    if (progress < 1) {
+                        requestAnimationFrame(tick);
+                    }
+                }
 
+                requestAnimationFrame(tick);
+            });
 
-            <h3>
-                No vulnerabilities detected
-            </h3>
+            const bars = document.querySelectorAll(".severity-fill");
+            bars.forEach((bar, index) => {
+                setTimeout(() => {
+                    bar.style.width = bar.dataset.width || "0%";
+                }, 500 + (index * 90));
+            });
 
-
-            <p>
-
-                SecureCI did not find any reported
-                security vulnerabilities.
-
-            </p>
-
-
-            <div class="success-message">
-
-                🎉 Security Gate is ready for deployment.
-
-            </div>
-
-        </div>
-
-
-    {% endif %}
-
-
-</main>
-
-
-<footer>
-
-    SecureCI — DevSecOps Security Platform
-
-</footer>
-
-
+            document.querySelectorAll(".finding-card").forEach((card, index) => {
+                card.style.setProperty("--finding-delay", `${Math.min(index * 45, 450)}ms`);
+            });
+        })();
+    </script>
 </body>
-
 </html>
